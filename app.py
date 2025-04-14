@@ -1,8 +1,9 @@
 import os
+import os
 from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_community.tools.tavily_search import TavilySearchResults # Using Tavily as an example, can be swapped with Serper
+from langchain.agents import AgentExecutor, create_tool_calling_agent, Tool
+from langchain_community.utilities import GoogleSerperAPIWrapper # Import Serper wrapper
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -19,7 +20,6 @@ AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION")
 AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4") # Defaulting to gpt-4, adjust if needed
 
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
-# TAVILY_API_KEY = os.getenv("TAVILY_API_KEY") # Keep this if using Tavily instead of Serper
 
 # --- Initialization ---
 def initialize_components():
@@ -41,13 +41,16 @@ def initialize_components():
         max_tokens=1000
     )
 
-    # Initialize Tools (Web Search)
-    # TODO: Replace Tavily with Serper integration if preferred
-    # from langchain_community.utilities import GoogleSerperAPIWrapper
-    # search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
-    # tools = [Tool(name="Intermediate Answer", func=search.run, description="useful for when you need to ask with search")]
-    search_tool = TavilySearchResults(max_results=3) # Using Tavily for now
-    tools = [search_tool]
+    # Initialize Tools (Web Search using Serper)
+    search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
+    # Define the tool for the agent. Ensure the description is clear for the agent's understanding.
+    tools = [
+        Tool(
+            name="web_search",
+            func=search.run,
+            description="Useful for when you need to answer questions about current events, general knowledge, or look up information you don't know. Input should be a search query."
+        )
+    ]
 
     # Define the prompt template for the agent
     # Customize this prompt to guide the chatbot's behavior for mental health support
