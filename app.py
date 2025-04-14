@@ -46,7 +46,7 @@ def initialize_components():
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             api_key=AZURE_OPENAI_API_KEY,
             api_version=AZURE_OPENAI_API_VERSION,
-            model_name="gpt-4o-standard", # Specify the model name directly
+            model_name="gpt-4o", # Specify the model name directly
             temperature=0.7,
             max_tokens=1000
         )
