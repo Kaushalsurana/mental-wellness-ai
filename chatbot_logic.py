@@ -22,25 +22,33 @@ class StreamlitCallbackHandler(BaseCallbackHandler):
     """Custom callback handler to display tool results in Streamlit."""
 
     def __init__(self):
-        self.search_results = None
+        # Store results temporarily. Cleared upon retrieval.
+        self._search_results = None
+        # Ensure 'st' calls don't error if run outside Streamlit context (though unlikely here)
+        self._has_streamlit = True
+        try:
+            import streamlit as st
+        except ImportError:
+            self._has_streamlit = False
+
 
     def on_tool_start(self, serialized, input_str, **kwargs):
-        """Optional: Could indicate that a tool is starting."""
-        # print(f"Tool Start: {serialized.get('name')}")
+        """Optional: Could indicate tool start"""
         pass
 
     def on_tool_end(self, output, **kwargs):
-        """Capture the output of the tool (search results)."""
-        # Assuming the tool used is the web_search tool
-        # print(f"Tool End Output: {output}") # Debugging
-        self.search_results = output
-        # Display results immediately using a dedicated area (requires passing st object or using session state)
-        # For simplicity here, we store it and let the main app display it.
+        """Capture the output of the 'web_search' tool."""
+        tool_name = kwargs.get("name", "") # Get tool name if available in newer LangChain versions
+        # You might need to inspect 'kwargs' or 'serialized' if 'name' isn't directly available
+        # For now, we assume any tool ending here *might* be search, but better to be specific if possible.
+        # if tool_name == "web_search": # Be more specific if possible
+        print(f"Tool End Output captured: {output[:100]}...") # Debugging
+        self._search_results = output
 
     def get_search_results(self):
         """Retrieve and clear the stored search results."""
-        results = self.search_results
-        self.search_results = None # Clear after retrieval
+        results = self._search_results
+        self._search_results = None # Clear after retrieval
         return results
 
 # --- Initialization Function ---
