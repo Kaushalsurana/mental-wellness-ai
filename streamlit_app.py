@@ -6,128 +6,151 @@ from langchain_core.messages import HumanMessage, AIMessage
 from chatbot_logic import initialize_components, StreamlitCallbackHandler
 
 # --- Streamlit Page Configuration ---
-st.set_page_config(page_title="Mental Health Support Chatbot", layout="wide")
+st.set_page_config(page_title="Mental Health Support Chatbot", layout="wide", initial_sidebar_state="collapsed")
 st.title("🧠 GenAI Mental Health Assistant")
-st.caption("This chatbot offers supportive conversation and can search the web for general info. It does not provide medical advice.")
+st.caption("This chatbot offers supportive conversation and can search the web for general info. It does *not* provide medical advice.")
+st.divider() # Adds a visual separator
 
 # --- Initialization ---
 # Initialize the agent executor (cached)
 agent_executor = initialize_components()
 
-# Initialize chat history in session state if it doesn't exist
+# Initialize chat history and callback handler in session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+# Ensure callback handler is created once per session or reset appropriately
+# Using cache_resource for the agent already handles re-creation if needed.
+# For the callback, we might want one instance per session.
 if "callback_handler" not in st.session_state:
     st.session_state.callback_handler = StreamlitCallbackHandler()
 
 # --- Display Chat History ---
-# Iterate through the existing chat history and display messages
-for message in st.session_state.chat_history:
-    if isinstance(message, HumanMessage):
-        with st.chat_message("user"):
-            st.markdown(message.content)
-    elif isinstance(message, AIMessage):
-        with st.chat_message("assistant"):
-            # Check if there were intermediate search results associated with this AIMessage
-            # The 'additional_kwargs' might contain info if return_intermediate_steps=True was used effectively
-            # However, using the callback is more direct for this request.
-            if "search_results" in message.additional_kwargs and message.additional_kwargs["search_results"]:
-                 with st.expander("🔎 Show Search Results", expanded=False):
-                    st.info(f"I searched the web and found this:\n\n---\n{message.additional_kwargs['search_results']}")
-            st.markdown(message.content)
+# Store search results associated with messages to redisplay correctly
+def display_chat_history():
+    for i, message in enumerate(st.session_state.chat_history):
+        if isinstance(message, HumanMessage):
+            with st.chat_message("user"):
+                st.markdown(message.content)
+        elif isinstance(message, AIMessage):
+            with st.chat_message("assistant"):
+                # Check if search results were stored from the generation process
+                search_results_html = message.additional_kwargs.get("search_results_html", None)
+                if search_results_html:
+                    # Use an expander to show the results that *led* to this message
+                    with st.expander("🔎 Show Search Information Used", expanded=False):
+                        # Use unsafe_allow_html=True carefully if the source is trusted (like formatted markdown/html we create)
+                        st.markdown(search_results_html, unsafe_allow_html=True)
+                st.markdown(message.content) # Display the main message content
 
+display_chat_history() # Display history initially
 
 # --- Handle User Input ---
 user_input = st.chat_input("How can I help you today?")
 
 if user_input and agent_executor:
-    # Display user message
+    # Display user message immediately
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Add user message to chat history
+    # Add user message to history
     st.session_state.chat_history.append(HumanMessage(content=user_input))
 
     # Prepare agent input
     agent_input = {
         "input": user_input,
-        "chat_history": st.session_state.chat_history # Pass current history
+        # Pass only a relevant subset of history if it gets too long
+        "chat_history": st.session_state.chat_history[-10:] # Pass last 5 pairs
     }
 
-    # Use a placeholder for the assistant's response stream
+    # --- Interaction Handling with Loading and Streaming ---
     with st.chat_message("assistant"):
+        # 1. Intermediate display area for search results (appears above final answer)
+        intermediate_display = st.empty()
+        # 2. Placeholder for the final streaming response
         message_placeholder = st.empty()
-        full_response = ""
-        search_results_md = "" # To store search results formatted for display
+        # 3. Loading Spinner
+        with st.spinner("👩‍⚕️ Assistant is thinking..."):
+            full_response = ""
+            search_results_content = None # To store raw search results
+            search_displayed = False # Flag to display search results only once
 
-        # Create a new callback handler instance for this specific invocation
-        # Or reuse the session state one, ensuring it's cleared properly
-        current_callback_handler = st.session_state.callback_handler # Use the session state handler
+            # Get the persistent callback handler
+            current_callback_handler = st.session_state.callback_handler
 
-        # Invoke the agent using stream for better responsiveness and callbacks
-        try:
-            # response = agent_executor.invoke(agent_input, config={"callbacks": [current_callback_handler]})
-            # bot_response_content = response.get('output', "Sorry, I encountered an issue.")
+            try:
+                assistant_response_chunks = []
+                # Use the stream method
+                for chunk in agent_executor.stream(agent_input, config={"callbacks": [current_callback_handler]}):
+                    # --- Check for Search Results (using Callback) ---
+                    # Check if the callback handler captured new results *during* this stream
+                    search_results = current_callback_handler.get_search_results() # get_search_results clears the stored results
+                    if search_results and not search_displayed:
+                        search_results_content = search_results # Store raw results
+                        # Format for display in the intermediate area
+                        search_results_html = f"""
+                        <details>
+                            <summary>🔎 I looked this up on the web...</summary>
+                            <div style="padding: 10px; border: 1px solid #eee; border-radius: 5px; margin-top: 5px; background-color: #f9f9f9;">
+                                <strong>Search Results Summary:</strong><br>
+                                <em>{search_results_content}</em>
+                            </div>
+                        </details>
+                        """
+                        intermediate_display.markdown(search_results_html, unsafe_allow_html=True)
+                        search_displayed = True # Mark as displayed for this turn
 
-            # Using stream for potentially better UX and capturing intermediate thoughts/tool calls
-            assistant_response_chunks = []
-            intermediate_steps_display = st.empty() # Placeholder for search results
-
-            for chunk in agent_executor.stream(agent_input, config={"callbacks": [current_callback_handler]}):
-                # Render intermediate steps (like search results) if the callback captured them
-                search_results = current_callback_handler.get_search_results()
-                if search_results:
-                    search_results_md = f"🔎 **Searching...**\n\n---\n*Found:* {search_results}\n---"
-                    intermediate_steps_display.info(search_results_md) # Display search results *above* final answer stream
-
-                # Process different types of chunks from the stream
-                if "actions" in chunk:
-                    for action in chunk["actions"]:
-                         # Optional: Could display a thinking indicator here
-                         # message_placeholder.markdown(f"Thinking... using {action.tool}...")
-                         pass # Action details are handled by callbacks/agent execution
-
-                elif "steps" in chunk:
-                    # Tool results might appear here too, handled by callback ideally
-                    pass
-
-                elif "messages" in chunk:
-                    # This usually contains the final response chunks
-                    for message in chunk["messages"]:
-                        if isinstance(message, AIMessage):
-                             assistant_response_chunks.append(message.content)
-                             # Stream the response chunk by chunk to the placeholder
+                    # --- Stream Final Answer Chunks ---
+                    # Look for message content chunks
+                    messages = chunk.get("messages", [])
+                    for message in messages:
+                         if isinstance(message, AIMessage) and message.content:
+                             new_content = message.content
+                             assistant_response_chunks.append(new_content)
                              full_response = "".join(assistant_response_chunks)
-                             message_placeholder.markdown(full_response + "▌") # Simulate typing cursor
+                             # Update placeholder with streaming text + typing cursor
+                             message_placeholder.markdown(full_response + "▌")
 
-            # Final update to the message placeholder
-            message_placeholder.markdown(full_response)
-            bot_response_content = full_response
+                # Final update to remove the typing cursor
+                message_placeholder.markdown(full_response)
+                bot_response_content = full_response
 
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
-            bot_response_content = "Sorry, I encountered an error while processing your request."
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+                bot_response_content = "Sorry, I encountered an error processing your request."
+                message_placeholder.markdown(bot_response_content) # Display error in the placeholder
 
-        # --- Store and Display Final Response ---
+    # --- Store Final Response and Rerun ---
+    # Store the final message along with any search results that were displayed
+    formatted_search_results_for_storage = None
+    if search_displayed and search_results_content:
+         # Store the same HTML used for display, or just the raw content
+         formatted_search_results_for_storage = f"""
+            <div style="padding: 10px; border: 1px solid #eee; border-radius: 5px; margin-top: 5px; background-color: #f9f9f9;">
+                <strong>Search Results Summary:</strong><br>
+                <em>{search_results_content}</em>
+            </div>
+            """
 
-        # Add assistant response to chat history
-        # Store search results with the message if they were displayed
-        ai_message = AIMessage(
-            content=bot_response_content,
-            additional_kwargs={"search_results": search_results_md if search_results_md else None} # Store formatted results
-            )
-        st.session_state.chat_history.append(ai_message)
+    ai_message = AIMessage(
+        content=bot_response_content,
+        additional_kwargs={
+            "search_results_html": formatted_search_results_for_storage
+            }
+    )
+    st.session_state.chat_history.append(ai_message)
 
-        # Optional: Limit chat history size
-        MAX_HISTORY_LEN = 10 # Keep last 5 pairs
-        if len(st.session_state.chat_history) > MAX_HISTORY_LEN:
-            st.session_state.chat_history = st.session_state.chat_history[-MAX_HISTORY_LEN:]
+    # Optional: Limit chat history size (applied *after* adding the latest message)
+    MAX_HISTORY_LEN = 10 # Keep last 5 pairs
+    if len(st.session_state.chat_history) > MAX_HISTORY_LEN:
+        st.session_state.chat_history = st.session_state.chat_history[-MAX_HISTORY_LEN:]
 
-        # Rerun is implicitly handled by Streamlit after input processing,
-        # which will redraw the chat history including the new messages.
+    # Streamlit will automatically rerun after the script finishes,
+    # redrawing the history including the latest user and assistant messages.
+    # No explicit rerun needed here.
 
-elif not agent_executor:
-    st.warning("Chatbot initialization failed. Please check configuration and logs.")
+elif not agent_executor and user_input:
+    st.warning("Chatbot initialization failed. Cannot process request. Please check configuration and logs.")
 
-# Add a footer or additional info if needed
-# st.sidebar.info("...")
+# --- Optional: Add a sidebar for info or settings ---
+st.sidebar.header("About")
+st.sidebar.info("This is a GenAI chatbot for mental health support...")
