@@ -152,5 +152,5 @@ elif not agent_executor and user_input:
     st.warning("Chatbot initialization failed. Cannot process request. Please check configuration and logs.")
 
 # --- Optional: Add a sidebar for info or settings ---
-st.sidebar.header("About")
-st.sidebar.info("This is a GenAI chatbot for mental health support...")
+# st.sidebar.header("About")
+# st.sidebar.info("This is a GenAI chatbot for mental health support...")
