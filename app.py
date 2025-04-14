@@ -15,9 +15,8 @@ load_dotenv()
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION")
-# Note: AzureChatOpenAI might require a deployment name, even if not explicitly in the .env
-# If issues arise, you might need to specify it directly or add it back to .env
-AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4") # Defaulting to gpt-4, adjust if needed
+# Deployment name removed based on user feedback
+# AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
@@ -25,21 +24,35 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 def initialize_components():
     """Initializes the LLM, tools, and agent."""
 
-    if not all([AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_VERSION, SERPER_API_KEY]):
+    # Check for required environment variables
+    required_vars = {
+        "AZURE_OPENAI_API_KEY": AZURE_OPENAI_API_KEY,
+        "AZURE_OPENAI_ENDPOINT": AZURE_OPENAI_ENDPOINT,
+        "AZURE_OPENAI_API_VERSION": AZURE_OPENAI_API_VERSION,
+        "SERPER_API_KEY": SERPER_API_KEY
+    }
+    missing_vars = [k for k, v in required_vars.items() if not v]
+
+    if missing_vars:
          print("Error: Required environment variables are missing.")
-         print("Please create a .env file based on .env.example and fill in your API keys.")
+         print(f"Missing: {', '.join(missing_vars)}")
+         print("Please ensure your .env file is correctly set up based on .env.example.")
          return None, None, None # Indicate failure
 
     # Initialize Azure Chat LLM
-    # Note: Adjust deployment_name if needed based on your Azure setup
-    llm = AzureChatOpenAI(
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
-        api_key=AZURE_OPENAI_API_KEY,
-        api_version=AZURE_OPENAI_API_VERSION,
-        azure_deployment=AZURE_OPENAI_DEPLOYMENT_NAME, # This might be necessary
-        temperature=0.7, # Adjust creativity/factuality
-        max_tokens=1000
-    )
+    # Using model_name instead of azure_deployment based on user feedback
+    try:
+        llm = AzureChatOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=AZURE_OPENAI_API_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+            model_name="gpt-4o-standard", # Specify the model name directly
+            temperature=0.7,
+            max_tokens=1000
+        )
+    except Exception as e:
+        print(f"Error initializing AzureChatOpenAI: {e}")
+        return None, None, None # Indicate failure
 
     # Initialize Tools (Web Search using Serper)
     search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
